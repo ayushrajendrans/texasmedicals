@@ -1,58 +1,26 @@
 /**
  * Texas Medicals - Centralized Form Handler
- * Sends form submissions to the client's email via FormSubmit.co AJAX API.
- * No backend required. Just update CLIENT_EMAIL below.
+ * Configures forms to use standard HTML POST submission to FormSubmit.co.
+ * This bypasses CORS and AdBlocker issues common with AJAX form submissions.
  */
 (function () {
   'use strict';
 
   // ── Configuration ───────────────────────────────────────────────────────
-  const CLIENT_EMAIL = 'contact@texasmedicalrevenue.com';
-  const FORMSUBMIT_URL = `https://formsubmit.co/ajax/${CLIENT_EMAIL}`;
-
-  // ── Helper: create a success/error banner ───────────────────────────────
-  function createBanner(type, message) {
-    const banner = document.createElement('div');
-    banner.setAttribute('role', 'alert');
-    banner.style.cssText = `
-      margin-top: 1.25rem;
-      padding: 1rem 1.5rem;
-      border-radius: 12px;
-      font-size: 0.95rem;
-      font-weight: 500;
-      text-align: center;
-      animation: tmFadeIn 0.4s ease;
-      ${
-        type === 'success'
-          ? 'background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.4); color: #065f46;'
-          : 'background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.4); color: #7f1d1d;'
-      }
-    `;
-    banner.innerHTML =
-      type === 'success'
-        ? `<span style="font-size:1.3rem;">&#x2705;</span>&nbsp; ${message}`
-        : `<span style="font-size:1.3rem;">&#x274C;</span>&nbsp; ${message}`;
-    return banner;
-  }
-
-  // ── Inject keyframe animation once ──────────────────────────────────────
-  if (!document.getElementById('tm-form-style')) {
-    const style = document.createElement('style');
-    style.id = 'tm-form-style';
-    style.textContent = `
-      @keyframes tmFadeIn {
-        from { opacity: 0; transform: translateY(-8px); }
-        to   { opacity: 1; transform: translateY(0); }
-      }
-    `;
-    document.head.appendChild(style);
-  }
+  // TODO: Replace this with your actual Web3Forms Access Key
+  const WEB3FORMS_ACCESS_KEY = '2219e60f-f058-4c72-9126-8d9dce22096b'; 
+  const WEB3FORMS_URL = 'https://api.web3forms.com/submit';
 
   // ── Attach handler to a single form ─────────────────────────────────────
   function attachHandler(form) {
     if (form.dataset.tmHandled) return;
     form.dataset.tmHandled = 'true';
 
+    // Set standard HTML form attributes
+    form.action = WEB3FORMS_URL;
+    form.method = 'POST';
+
+    // Find inputs
     const nameInput =
       form.querySelector('#name') ||
       form.querySelector('[name="name"]') ||
@@ -66,82 +34,59 @@
       form.querySelector('[name="message"]') ||
       form.querySelector('textarea');
 
-    if (!nameInput && !emailInput) return;
+    // Ensure inputs have 'name' attributes required for standard submission
+    if (nameInput && !nameInput.name) nameInput.name = 'name';
+    if (emailInput && !emailInput.name) emailInput.name = 'email';
+    if (messageInput && !messageInput.name) messageInput.name = 'message';
 
-    const submitBtn = form.querySelector('button[type="submit"]');
+    // Helper to add hidden config fields
+    function addHiddenInput(name, value) {
+      if (!form.querySelector(`input[name="${name}"]`)) {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = value;
+        form.appendChild(input);
+      }
+    }
 
+    // Web3Forms required access key
+    addHiddenInput('access_key', WEB3FORMS_ACCESS_KEY);
+    
+    // Optional Web3Forms configuration
+    addHiddenInput('subject', 'New Contact Request from Texas Medicals Website');
+    addHiddenInput('from_name', 'Texas Medicals Website');
+    addHiddenInput('redirect', new URL('thank-you.html', window.location.href).href);
+    
     form.addEventListener('submit', function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-
       if (form.classList.contains('needs-validation')) {
+        if (!form.checkValidity()) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
         form.classList.add('was-validated');
-        if (!form.checkValidity()) return;
-      } else {
-        if (nameInput && !nameInput.value.trim()) { nameInput.focus(); return; }
-        if (emailInput && !emailInput.value.trim()) { emailInput.focus(); return; }
       }
-
-      const existingBanner = form.parentNode && form.parentNode.querySelector('.tm-result-banner');
-      if (existingBanner) existingBanner.remove();
-
-      const originalBtnText = submitBtn ? submitBtn.innerHTML : '';
+      
+      if (!form.checkValidity()) {
+        return; // Stop if invalid
+      }
+      
+      // Provide visual feedback that submission is happening
+      const submitBtn = form.querySelector('button[type="submit"]');
       if (submitBtn) {
+        // Store original text
+        if (!submitBtn.dataset.originalText) {
+          submitBtn.dataset.originalText = submitBtn.innerHTML;
+        }
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Sending...';
         submitBtn.disabled = true;
-        submitBtn.innerHTML = 'Sending...';
+        
+        // Reset after a timeout just in case it fails to navigate
+        setTimeout(() => {
+          submitBtn.innerHTML = submitBtn.dataset.originalText;
+          submitBtn.disabled = false;
+        }, 5000);
       }
-
-      const payload = {
-        _subject: 'New Contact Request from ' + ((nameInput && nameInput.value.trim()) || 'Website Visitor'),
-        name: (nameInput && nameInput.value.trim()) || '',
-        email: (emailInput && emailInput.value.trim()) || '',
-        message: (messageInput && messageInput.value.trim()) || '',
-        _template: 'table',
-        _captcha: 'false',
-      };
-
-      fetch(FORMSUBMIT_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-          const ok = data.success === 'true' || data.success === true;
-          const banner = createBanner(
-            ok ? 'success' : 'error',
-            ok
-              ? 'Thank you! Your message has been sent. Our team will get in touch with you shortly.'
-              : 'Something went wrong. Please try again or email us directly.'
-          );
-          banner.classList.add('tm-result-banner');
-          const submitRow = submitBtn ? (submitBtn.closest('div') || form) : form;
-          submitRow.parentNode.insertBefore(banner, submitRow.nextSibling);
-          if (ok) {
-            form.reset();
-            form.classList.remove('was-validated');
-          }
-        })
-        .catch(function () {
-          const banner = createBanner('error', 'Network error. Please check your connection and try again.');
-          banner.classList.add('tm-result-banner');
-          const submitRow = submitBtn ? (submitBtn.closest('div') || form) : form;
-          submitRow.parentNode.insertBefore(banner, submitRow.nextSibling);
-        })
-        .finally(function () {
-          if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = originalBtnText;
-          }
-          setTimeout(function () {
-            const b = form.parentNode && form.parentNode.querySelector('.tm-result-banner');
-            if (b) {
-              b.style.transition = 'opacity 0.5s';
-              b.style.opacity = '0';
-              setTimeout(function() { b.remove(); }, 500);
-            }
-          }, 8000);
-        });
     });
   }
 
